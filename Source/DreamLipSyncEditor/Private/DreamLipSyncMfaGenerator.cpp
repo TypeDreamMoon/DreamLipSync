@@ -3,6 +3,7 @@
 #include "DreamLipSyncMfaGenerator.h"
 
 #include "DreamLipSyncClip.h"
+#include "DreamLipSyncFrameGenerationUtils.h"
 #include "DreamLipSyncProcessRunner.h"
 #include "DreamLipSyncSettings.h"
 #include "EditorFramework/AssetImportData.h"
@@ -75,65 +76,121 @@ FString ResolveOptionalPath(const FString& Value)
 	return bLooksLikePath ? FPaths::ConvertRelativePathToFull(Value) : Value;
 }
 
-void AppendMfaOptions(FString& Params, const UDreamLipSyncSettings* Settings)
+const FDreamLipSyncMfaGenerationSettings* GetClipMfaSettings(const UDreamLipSyncClip* Clip)
 {
-	if (!Settings)
+	return Clip && Clip->MfaGenerationSettings.bOverrideProjectSettings ? &Clip->MfaGenerationSettings : nullptr;
+}
+
+FString GetMfaRootDirectory(const UDreamLipSyncClip* Clip, const UDreamLipSyncSettings* Settings)
+{
+	if (const FDreamLipSyncMfaGenerationSettings* ClipSettings = GetClipMfaSettings(Clip))
+	{
+		return ClipSettings->MfaRootDirectory.Path;
+	}
+
+	return Settings ? Settings->MfaRootDirectory.Path : FString();
+}
+
+FString GetMfaDictionary(const UDreamLipSyncClip* Clip, const UDreamLipSyncSettings* Settings)
+{
+	if (const FDreamLipSyncMfaGenerationSettings* ClipSettings = GetClipMfaSettings(Clip))
+	{
+		return ClipSettings->MfaDictionary;
+	}
+
+	return Settings ? Settings->MfaDictionary : FString();
+}
+
+FString GetMfaAcousticModel(const UDreamLipSyncClip* Clip, const UDreamLipSyncSettings* Settings)
+{
+	if (const FDreamLipSyncMfaGenerationSettings* ClipSettings = GetClipMfaSettings(Clip))
+	{
+		return ClipSettings->MfaAcousticModel;
+	}
+
+	return Settings ? Settings->MfaAcousticModel : FString();
+}
+
+void AppendMfaOptions(FString& Params, const UDreamLipSyncClip* Clip, const UDreamLipSyncSettings* Settings)
+{
+	const FDreamLipSyncMfaGenerationSettings* ClipSettings = GetClipMfaSettings(Clip);
+	if (!Settings && !ClipSettings)
 	{
 		Params += TEXT(" -j 1 --clean --overwrite --quiet --use_mp --no_use_threading --no_use_postgres --textgrid_cleanup --output_format long_textgrid");
 		return;
 	}
 
-	AppendOption(Params, TEXT("--config_path"), ResolveOptionalPath(Settings->MfaConfigPath.FilePath));
-	AppendOption(Params, TEXT("--speaker_characters"), Settings->MfaSpeakerCharacters, false);
-	AppendOption(Params, TEXT("--g2p_model_path"), ResolveOptionalPath(Settings->MfaG2PModelPath));
-	AppendOption(Params, TEXT("--temporary_directory"), ResolveOptionalPath(Settings->MfaRootDirectory.Path));
+	const FString ConfigPath = ClipSettings ? ClipSettings->MfaConfigPath.FilePath : Settings->MfaConfigPath.FilePath;
+	const FString SpeakerCharacters = ClipSettings ? ClipSettings->MfaSpeakerCharacters : Settings->MfaSpeakerCharacters;
+	const FString G2PModelPath = ClipSettings ? ClipSettings->MfaG2PModelPath : Settings->MfaG2PModelPath;
+	const FString RootDirectory = ClipSettings ? ClipSettings->MfaRootDirectory.Path : Settings->MfaRootDirectory.Path;
+	const int32 NumJobs = ClipSettings ? ClipSettings->MfaNumJobs : Settings->MfaNumJobs;
+	const bool bClean = ClipSettings ? ClipSettings->bMfaClean : Settings->bMfaClean;
+	const bool bOverwrite = ClipSettings ? ClipSettings->bMfaOverwrite : Settings->bMfaOverwrite;
+	const bool bQuiet = ClipSettings ? ClipSettings->bMfaQuiet : Settings->bMfaQuiet;
+	const bool bVerbose = ClipSettings ? ClipSettings->bMfaVerbose : Settings->bMfaVerbose;
+	const bool bFinalClean = ClipSettings ? ClipSettings->bMfaFinalClean : Settings->bMfaFinalClean;
+	const bool bUseMultiprocessing = ClipSettings ? ClipSettings->bMfaUseMultiprocessing : Settings->bMfaUseMultiprocessing;
+	const bool bUseThreading = ClipSettings ? ClipSettings->bMfaUseThreading : Settings->bMfaUseThreading;
+	const bool bUsePostgres = ClipSettings ? ClipSettings->bMfaUsePostgres : Settings->bMfaUsePostgres;
+	const bool bSingleSpeaker = ClipSettings ? ClipSettings->bMfaSingleSpeaker : Settings->bMfaSingleSpeaker;
+	const bool bNoTokenization = ClipSettings ? ClipSettings->bMfaNoTokenization : Settings->bMfaNoTokenization;
+	const bool bTextGridCleanup = ClipSettings ? ClipSettings->bMfaTextGridCleanup : Settings->bMfaTextGridCleanup;
+	const bool bIncludeOriginalText = ClipSettings ? ClipSettings->bMfaIncludeOriginalText : Settings->bMfaIncludeOriginalText;
+	const bool bFineTune = ClipSettings ? ClipSettings->bMfaFineTune : Settings->bMfaFineTune;
+	const float FineTuneBoundaryTolerance = ClipSettings ? ClipSettings->MfaFineTuneBoundaryTolerance : Settings->MfaFineTuneBoundaryTolerance;
+	const FString ExtraArguments = ClipSettings ? ClipSettings->MfaExtraArguments.TrimStartAndEnd() : Settings->MfaExtraArguments.TrimStartAndEnd();
 
-	Params += FString::Printf(TEXT(" -j %d"), FMath::Max(1, Settings->MfaNumJobs));
-	AppendBoolOption(Params, TEXT("--clean"), TEXT("--no_clean"), Settings->bMfaClean);
-	AppendBoolOption(Params, TEXT("--overwrite"), TEXT("--no_overwrite"), Settings->bMfaOverwrite);
-	AppendBoolOption(Params, TEXT("--final_clean"), TEXT("--no_final_clean"), Settings->bMfaFinalClean);
-	AppendBoolOption(Params, TEXT("--use_mp"), TEXT("--no_use_mp"), Settings->bMfaUseMultiprocessing);
-	AppendBoolOption(Params, TEXT("--use_threading"), TEXT("--no_use_threading"), Settings->bMfaUseThreading);
-	AppendBoolOption(Params, TEXT("--use_postgres"), TEXT("--no_use_postgres"), Settings->bMfaUsePostgres);
-	AppendBoolOption(Params, TEXT("--textgrid_cleanup"), TEXT("--no_textgrid_cleanup"), Settings->bMfaTextGridCleanup);
+	AppendOption(Params, TEXT("--config_path"), ResolveOptionalPath(ConfigPath));
+	AppendOption(Params, TEXT("--speaker_characters"), SpeakerCharacters, false);
+	AppendOption(Params, TEXT("--g2p_model_path"), ResolveOptionalPath(G2PModelPath));
+	AppendOption(Params, TEXT("--temporary_directory"), ResolveOptionalPath(RootDirectory));
 
-	if (Settings->bMfaQuiet)
+	Params += FString::Printf(TEXT(" -j %d"), FMath::Max(1, NumJobs));
+	AppendBoolOption(Params, TEXT("--clean"), TEXT("--no_clean"), bClean);
+	AppendBoolOption(Params, TEXT("--overwrite"), TEXT("--no_overwrite"), bOverwrite);
+	AppendBoolOption(Params, TEXT("--final_clean"), TEXT("--no_final_clean"), bFinalClean);
+	AppendBoolOption(Params, TEXT("--use_mp"), TEXT("--no_use_mp"), bUseMultiprocessing);
+	AppendBoolOption(Params, TEXT("--use_threading"), TEXT("--no_use_threading"), bUseThreading);
+	AppendBoolOption(Params, TEXT("--use_postgres"), TEXT("--no_use_postgres"), bUsePostgres);
+	AppendBoolOption(Params, TEXT("--textgrid_cleanup"), TEXT("--no_textgrid_cleanup"), bTextGridCleanup);
+
+	if (bQuiet)
 	{
 		Params += TEXT(" --quiet --no_verbose");
 	}
 	else
 	{
-		AppendBoolOption(Params, TEXT("--verbose"), TEXT("--no_verbose"), Settings->bMfaVerbose);
+		AppendBoolOption(Params, TEXT("--verbose"), TEXT("--no_verbose"), bVerbose);
 		Params += TEXT(" --no_quiet");
 	}
 
-	if (Settings->bMfaSingleSpeaker)
+	if (bSingleSpeaker)
 	{
 		Params += TEXT(" --single_speaker");
 	}
 
-	if (Settings->bMfaNoTokenization)
+	if (bNoTokenization)
 	{
 		Params += TEXT(" --no_tokenization");
 	}
 
-	if (Settings->bMfaIncludeOriginalText)
+	if (bIncludeOriginalText)
 	{
 		Params += TEXT(" --include_original_text");
 	}
 
-	if (Settings->bMfaFineTune)
+	if (bFineTune)
 	{
 		Params += TEXT(" --fine_tune");
-		if (Settings->MfaFineTuneBoundaryTolerance > 0.f)
+		if (FineTuneBoundaryTolerance > 0.f)
 		{
-			Params += FString::Printf(TEXT(" --fine_tune_boundary_tolerance %.4f"), Settings->MfaFineTuneBoundaryTolerance);
+			Params += FString::Printf(TEXT(" --fine_tune_boundary_tolerance %.4f"), FineTuneBoundaryTolerance);
 		}
 	}
 
 	Params += TEXT(" --output_format long_textgrid");
 
-	const FString ExtraArguments = Settings->MfaExtraArguments.TrimStartAndEnd();
 	if (!ExtraArguments.IsEmpty())
 	{
 		Params += TEXT(" ") + ExtraArguments;
@@ -450,7 +507,7 @@ TArray<FCue> BuildCuesFromIntervals(const TArray<FInterval>& Intervals)
 	return Cues;
 }
 
-TArray<FDreamLipSyncMorphWeight> BuildWeightsForViseme(const UDreamLipSyncClip* Clip, FName Viseme)
+TArray<FDreamLipSyncMorphWeight> BuildWeightsForViseme(const UDreamLipSyncClip* Clip, FName Viseme, const FDreamLipSyncFrameGenerationSettings& FrameSettings)
 {
 	if (!Clip)
 	{
@@ -476,25 +533,67 @@ void AddFrame(TArray<FDreamLipSyncMorphFrame>& Frames, float Time, TArray<FDream
 	Frame.Weights = MoveTemp(Weights);
 }
 
-TArray<FDreamLipSyncMorphFrame> BuildMorphFrames(const UDreamLipSyncClip* Clip, const TArray<FCue>& Cues, float BlendTime)
+FCue ApplyFrameSettingsToCue(const FCue& Cue, const FDreamLipSyncFrameGenerationSettings& FrameSettings)
+{
+	FCue Result = Cue;
+	Result.Start = FMath::Max(0.f, Result.Start + FrameSettings.TimeOffsetSeconds);
+	Result.End = FMath::Max(Result.Start, Result.End + FrameSettings.TimeOffsetSeconds + FMath::Max(0.f, FrameSettings.CueEndPadding));
+
+	const float MinDuration = FMath::Max(0.f, FrameSettings.MinCueDuration);
+	if (MinDuration > 0.f && Result.End - Result.Start < MinDuration)
+	{
+		const float Center = (Result.Start + Result.End) * 0.5f;
+		Result.Start = FMath::Max(0.f, Center - MinDuration * 0.5f);
+		Result.End = Result.Start + MinDuration;
+	}
+
+	return Result;
+}
+
+TArray<FDreamLipSyncMorphFrame> BuildMorphFrames(const UDreamLipSyncClip* Clip, const TArray<FCue>& Cues, float BlendTime, const FDreamLipSyncFrameGenerationSettings& FrameSettings)
 {
 	TArray<FDreamLipSyncMorphFrame> Frames;
-	Frames.Reserve(Cues.Num() * 2);
+	Frames.Reserve(Cues.Num() * 3 + 2);
 
+	float PreviousEnd = -1.f;
 	for (const FCue& Cue : Cues)
 	{
-		if (Cue.End <= Cue.Start)
+		const FCue AdjustedCue = ApplyFrameSettingsToCue(Cue, FrameSettings);
+		if (AdjustedCue.End <= AdjustedCue.Start)
 		{
 			continue;
 		}
 
-		AddFrame(Frames, Cue.Start, BuildWeightsForViseme(Clip, Cue.Viseme));
-
-		const float HoldEnd = Cue.End - FMath::Max(0.f, BlendTime);
-		if (HoldEnd > Cue.Start + 0.001f)
+		if (Frames.IsEmpty() && FrameSettings.bAddNeutralFrameAtStart && AdjustedCue.Start > 0.001f)
 		{
-			AddFrame(Frames, HoldEnd, BuildWeightsForViseme(Clip, Cue.Viseme));
+			AddFrame(Frames, 0.f, BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
 		}
+
+		if (FrameSettings.bInsertNeutralFramesInGaps && PreviousEnd >= 0.f)
+		{
+			const float Gap = AdjustedCue.Start - PreviousEnd;
+			if (Gap >= FrameSettings.NeutralGapThreshold)
+			{
+				const float NeutralBlendTime = FMath::Clamp(FrameSettings.NeutralBlendTime, 0.f, Gap * 0.5f);
+				AddFrame(Frames, PreviousEnd + NeutralBlendTime, BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
+				AddFrame(Frames, AdjustedCue.Start - NeutralBlendTime, BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
+			}
+		}
+
+		AddFrame(Frames, AdjustedCue.Start, BuildWeightsForViseme(Clip, AdjustedCue.Viseme, FrameSettings));
+
+		const float HoldEnd = AdjustedCue.End - FMath::Max(0.f, BlendTime);
+		if (HoldEnd > AdjustedCue.Start + 0.001f)
+		{
+			AddFrame(Frames, HoldEnd, BuildWeightsForViseme(Clip, AdjustedCue.Viseme, FrameSettings));
+		}
+
+		PreviousEnd = AdjustedCue.End;
+	}
+
+	if (!Frames.IsEmpty() && FrameSettings.bAddNeutralFrameAtEnd)
+	{
+		AddFrame(Frames, FMath::Max(Frames.Last().Time, PreviousEnd) + FMath::Max(0.f, FrameSettings.NeutralBlendTime), BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
 	}
 
 	return Frames;
@@ -541,9 +640,19 @@ bool FDreamLipSyncMfaGenerator::GenerateClipFromMfa(UDreamLipSyncClip* Clip, FSt
 	}
 
 	const UDreamLipSyncSettings* Settings = UDreamLipSyncSettings::Get();
-	const FString Dictionary = Settings && !Settings->MfaDictionary.IsEmpty() ? Settings->MfaDictionary : TEXT("mandarin_china_mfa");
-	const FString AcousticModel = Settings && !Settings->MfaAcousticModel.IsEmpty() ? Settings->MfaAcousticModel : TEXT("mandarin_mfa");
-	const FString MfaRootDirectory = Settings ? Settings->MfaRootDirectory.Path : FString();
+	FString Dictionary = DreamLipSyncMfa::GetMfaDictionary(Clip, Settings);
+	if (Dictionary.IsEmpty())
+	{
+		Dictionary = TEXT("mandarin_china_mfa");
+	}
+
+	FString AcousticModel = DreamLipSyncMfa::GetMfaAcousticModel(Clip, Settings);
+	if (AcousticModel.IsEmpty())
+	{
+		AcousticModel = TEXT("mandarin_mfa");
+	}
+
+	const FString MfaRootDirectory = DreamLipSyncMfa::GetMfaRootDirectory(Clip, Settings);
 
 	const FString WorkRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectIntermediateDir() / TEXT("DreamLipSync") / TEXT("MFA") / FGuid::NewGuid().ToString(EGuidFormats::Digits));
 	const FString CorpusDir = WorkRoot / TEXT("corpus");
@@ -571,7 +680,7 @@ bool FDreamLipSyncMfaGenerator::GenerateClipFromMfa(UDreamLipSyncClip* Clip, FSt
 	}
 
 	FString Params = TEXT("align");
-	DreamLipSyncMfa::AppendMfaOptions(Params, Settings);
+	DreamLipSyncMfa::AppendMfaOptions(Params, Clip, Settings);
 
 	Params += FString::Printf(
 		TEXT(" %s %s %s %s"),
@@ -709,8 +818,10 @@ bool FDreamLipSyncMfaGenerator::ImportMfaTextGridString(UDreamLipSyncClip* Clip,
 
 	const TArray<DreamLipSyncMfa::FCue> Cues = DreamLipSyncMfa::BuildCuesFromIntervals(Intervals);
 	const UDreamLipSyncSettings* Settings = UDreamLipSyncSettings::Get();
-	const float BlendTime = Clip->GenerationBlendTime >= 0.f ? Clip->GenerationBlendTime : (Settings ? Settings->BlendTime : 0.04f);
-	TArray<FDreamLipSyncMorphFrame> Frames = DreamLipSyncMfa::BuildMorphFrames(Clip, Cues, BlendTime);
+	const FDreamLipSyncFrameGenerationSettings FrameSettings = DreamLipSyncFrameGeneration::ResolveSettings(Clip, Settings);
+	const float BlendTime = DreamLipSyncFrameGeneration::ResolveBlendTime(Clip, Settings);
+	TArray<FDreamLipSyncMorphFrame> Frames = DreamLipSyncMfa::BuildMorphFrames(Clip, Cues, BlendTime, FrameSettings);
+	DreamLipSyncFrameGeneration::PostProcessFrames(Frames, Duration, FrameSettings);
 	if (Frames.IsEmpty())
 	{
 		OutMessage = TEXT("TextGrid parsed, but no MorphFrames could be generated. Check VisemeMappings on the clip.");
@@ -722,7 +833,7 @@ bool FDreamLipSyncMfaGenerator::ImportMfaTextGridString(UDreamLipSyncClip* Clip,
 	Clip->DataMode = EDreamLipSyncDataMode::MorphFrames;
 	Clip->MorphFrames = MoveTemp(Frames);
 	Clip->VisemeKeys.Reset();
-	Clip->Duration = Duration;
+	Clip->Duration = FMath::Max(Duration, Clip->MorphFrames.Last().Time);
 	Clip->bHoldLastKey = false;
 	Clip->MarkPackageDirty();
 

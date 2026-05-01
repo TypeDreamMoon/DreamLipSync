@@ -12,6 +12,8 @@ public:
 	virtual void ShutdownModule() override;
 
 private:
+	void RegisterMenus();
+
 	FDelegateHandle TrackEditorHandle;
 	TArray<TSharedPtr<FAssetTypeActions_Base>> CreatedAssetTypeActions;
 };

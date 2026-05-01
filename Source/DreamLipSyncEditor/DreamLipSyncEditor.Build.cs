@@ -15,12 +15,16 @@ public class DreamLipSyncEditor : ModuleRules
 				"CoreUObject",
 				"DreamLipSync",
 				"Engine",
+				"AssetRegistry",
 				"AssetTools",
+				"ContentBrowser",
+				"InputCore",
 				"Json",
 				"MovieScene",
 				"MovieSceneTools",
 				"MovieSceneTracks",
 				"Sequencer",
+				"ToolMenus",
 				"UnrealEd"
 			}
 		);
@@ -34,5 +38,22 @@ public class DreamLipSyncEditor : ModuleRules
 				"SequencerCore"
 			}
 		);
+
+		bool bWithAce = Plugins.GetPlugin("NV_ACE_Reference") != null;
+		if (bWithAce)
+		{
+			PrivateDependencyModuleNames.AddRange(
+				new string[]
+				{
+					"ACECore",
+					"ACERuntime"
+				}
+			);
+			PrivateDefinitions.Add("WITH_DREAMLIPSYNC_ACE=1");
+		}
+		else
+		{
+			PrivateDefinitions.Add("WITH_DREAMLIPSYNC_ACE=0");
+		}
 	}
 }

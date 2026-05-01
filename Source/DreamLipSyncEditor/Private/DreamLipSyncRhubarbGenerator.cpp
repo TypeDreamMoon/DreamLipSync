@@ -4,6 +4,7 @@
 
 #include "Dom/JsonObject.h"
 #include "DreamLipSyncClip.h"
+#include "DreamLipSyncFrameGenerationUtils.h"
 #include "DreamLipSyncProcessRunner.h"
 #include "DreamLipSyncSettings.h"
 #include "EditorFramework/AssetImportData.h"
@@ -50,7 +51,12 @@ FName MapRhubarbShapeToViseme(const FString& Shape)
 
 FString ResolveRecognizer(const UDreamLipSyncClip* Clip, const UDreamLipSyncSettings* Settings)
 {
-	const EDreamLipSyncRhubarbRecognizer Recognizer = Settings ? Settings->RhubarbRecognizer : EDreamLipSyncRhubarbRecognizer::Auto;
+	EDreamLipSyncRhubarbRecognizer Recognizer = Settings ? Settings->RhubarbRecognizer : EDreamLipSyncRhubarbRecognizer::Auto;
+	if (Clip && Clip->RhubarbGenerationSettings.bOverrideProjectSettings)
+	{
+		Recognizer = Clip->RhubarbGenerationSettings.Recognizer;
+	}
+
 	if (Recognizer == EDreamLipSyncRhubarbRecognizer::PocketSphinx)
 	{
 		return TEXT("pocketSphinx");
@@ -65,7 +71,7 @@ FString ResolveRecognizer(const UDreamLipSyncClip* Clip, const UDreamLipSyncSett
 	return Locale.StartsWith(TEXT("en"), ESearchCase::IgnoreCase) ? TEXT("pocketSphinx") : TEXT("phonetic");
 }
 
-TArray<FDreamLipSyncMorphWeight> BuildWeightsForViseme(const UDreamLipSyncClip* Clip, FName Viseme)
+TArray<FDreamLipSyncMorphWeight> BuildWeightsForViseme(const UDreamLipSyncClip* Clip, FName Viseme, const FDreamLipSyncFrameGenerationSettings& FrameSettings)
 {
 	if (!Clip)
 	{
@@ -91,25 +97,67 @@ void AddFrame(TArray<FDreamLipSyncMorphFrame>& Frames, float Time, TArray<FDream
 	Frame.Weights = MoveTemp(Weights);
 }
 
-TArray<FDreamLipSyncMorphFrame> BuildMorphFrames(const UDreamLipSyncClip* Clip, const TArray<FCue>& Cues, float BlendTime)
+FCue ApplyFrameSettingsToCue(const FCue& Cue, const FDreamLipSyncFrameGenerationSettings& FrameSettings)
+{
+	FCue Result = Cue;
+	Result.Start = FMath::Max(0.f, Result.Start + FrameSettings.TimeOffsetSeconds);
+	Result.End = FMath::Max(Result.Start, Result.End + FrameSettings.TimeOffsetSeconds + FMath::Max(0.f, FrameSettings.CueEndPadding));
+
+	const float MinDuration = FMath::Max(0.f, FrameSettings.MinCueDuration);
+	if (MinDuration > 0.f && Result.End - Result.Start < MinDuration)
+	{
+		const float Center = (Result.Start + Result.End) * 0.5f;
+		Result.Start = FMath::Max(0.f, Center - MinDuration * 0.5f);
+		Result.End = Result.Start + MinDuration;
+	}
+
+	return Result;
+}
+
+TArray<FDreamLipSyncMorphFrame> BuildMorphFrames(const UDreamLipSyncClip* Clip, const TArray<FCue>& Cues, float BlendTime, const FDreamLipSyncFrameGenerationSettings& FrameSettings)
 {
 	TArray<FDreamLipSyncMorphFrame> Frames;
-	Frames.Reserve(Cues.Num() * 2);
+	Frames.Reserve(Cues.Num() * 3 + 2);
 
+	float PreviousEnd = -1.f;
 	for (const FCue& Cue : Cues)
 	{
-		if (Cue.End <= Cue.Start)
+		const FCue AdjustedCue = ApplyFrameSettingsToCue(Cue, FrameSettings);
+		if (AdjustedCue.End <= AdjustedCue.Start)
 		{
 			continue;
 		}
 
-		AddFrame(Frames, Cue.Start, BuildWeightsForViseme(Clip, Cue.Viseme));
-
-		const float HoldEnd = Cue.End - FMath::Max(0.f, BlendTime);
-		if (HoldEnd > Cue.Start + 0.001f)
+		if (Frames.IsEmpty() && FrameSettings.bAddNeutralFrameAtStart && AdjustedCue.Start > 0.001f)
 		{
-			AddFrame(Frames, HoldEnd, BuildWeightsForViseme(Clip, Cue.Viseme));
+			AddFrame(Frames, 0.f, BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
 		}
+
+		if (FrameSettings.bInsertNeutralFramesInGaps && PreviousEnd >= 0.f)
+		{
+			const float Gap = AdjustedCue.Start - PreviousEnd;
+			if (Gap >= FrameSettings.NeutralGapThreshold)
+			{
+				const float NeutralBlendTime = FMath::Clamp(FrameSettings.NeutralBlendTime, 0.f, Gap * 0.5f);
+				AddFrame(Frames, PreviousEnd + NeutralBlendTime, BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
+				AddFrame(Frames, AdjustedCue.Start - NeutralBlendTime, BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
+			}
+		}
+
+		AddFrame(Frames, AdjustedCue.Start, BuildWeightsForViseme(Clip, AdjustedCue.Viseme, FrameSettings));
+
+		const float HoldEnd = AdjustedCue.End - FMath::Max(0.f, BlendTime);
+		if (HoldEnd > AdjustedCue.Start + 0.001f)
+		{
+			AddFrame(Frames, HoldEnd, BuildWeightsForViseme(Clip, AdjustedCue.Viseme, FrameSettings));
+		}
+
+		PreviousEnd = AdjustedCue.End;
+	}
+
+	if (!Frames.IsEmpty() && FrameSettings.bAddNeutralFrameAtEnd)
+	{
+		AddFrame(Frames, FMath::Max(Frames.Last().Time, PreviousEnd) + FMath::Max(0.f, FrameSettings.NeutralBlendTime), BuildWeightsForViseme(Clip, FrameSettings.NeutralViseme, FrameSettings));
 	}
 
 	return Frames;
@@ -203,7 +251,9 @@ bool FDreamLipSyncRhubarbGenerator::GenerateClipFromRhubarb(UDreamLipSyncClip* C
 
 	const UDreamLipSyncSettings* Settings = UDreamLipSyncSettings::Get();
 	const FString Recognizer = DreamLipSyncRhubarb::ResolveRecognizer(Clip, Settings);
-	const FString ExtendedShapes = Settings ? Settings->ExtendedShapes : TEXT("GHX");
+	const FString ExtendedShapes = Clip->RhubarbGenerationSettings.bOverrideProjectSettings
+		? Clip->RhubarbGenerationSettings.ExtendedShapes
+		: (Settings ? Settings->ExtendedShapes : TEXT("GHX"));
 
 	const FString WorkDir = FPaths::ProjectIntermediateDir() / TEXT("DreamLipSync") / TEXT("Rhubarb");
 	IFileManager::Get().MakeDirectory(*WorkDir, true);
@@ -289,8 +339,10 @@ bool FDreamLipSyncRhubarbGenerator::ImportRhubarbJsonString(UDreamLipSyncClip* C
 	}
 
 	const UDreamLipSyncSettings* Settings = UDreamLipSyncSettings::Get();
-	const float BlendTime = Clip->GenerationBlendTime >= 0.f ? Clip->GenerationBlendTime : (Settings ? Settings->BlendTime : 0.04f);
-	TArray<FDreamLipSyncMorphFrame> Frames = DreamLipSyncRhubarb::BuildMorphFrames(Clip, Cues, BlendTime);
+	const FDreamLipSyncFrameGenerationSettings FrameSettings = DreamLipSyncFrameGeneration::ResolveSettings(Clip, Settings);
+	const float BlendTime = DreamLipSyncFrameGeneration::ResolveBlendTime(Clip, Settings);
+	TArray<FDreamLipSyncMorphFrame> Frames = DreamLipSyncRhubarb::BuildMorphFrames(Clip, Cues, BlendTime, FrameSettings);
+	DreamLipSyncFrameGeneration::PostProcessFrames(Frames, Duration, FrameSettings);
 	if (Frames.IsEmpty())
 	{
 		OutMessage = TEXT("Rhubarb cues parsed, but no MorphFrames could be generated. Check VisemeMappings on the clip.");
@@ -302,7 +354,7 @@ bool FDreamLipSyncRhubarbGenerator::ImportRhubarbJsonString(UDreamLipSyncClip* C
 	Clip->DataMode = EDreamLipSyncDataMode::MorphFrames;
 	Clip->MorphFrames = MoveTemp(Frames);
 	Clip->VisemeKeys.Reset();
-	Clip->Duration = Duration;
+	Clip->Duration = FMath::Max(Duration, Clip->MorphFrames.Last().Time);
 	Clip->bHoldLastKey = false;
 	Clip->MarkPackageDirty();
 

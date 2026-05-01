@@ -55,6 +55,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float GenerationBlendTime = 0.04f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation|Frame Tuning")
+	bool bOverrideProjectFrameGenerationSettings = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation|Frame Tuning", meta = (EditCondition = "bOverrideProjectFrameGenerationSettings"))
+	FDreamLipSyncFrameGenerationSettings FrameGenerationSettings;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Viseme")
 	TArray<FDreamLipSyncVisemeMapping> VisemeMappings;
 
@@ -67,7 +73,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Morph Frame")
 	TArray<FDreamLipSyncMorphFrame> MorphFrames;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|External Import")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Source Morph Mapping")
 	TArray<FDreamLipSyncSourceMorphMapping> SourceMorphMappings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation", meta = (FilePathFilter = "wav;ogg"))
@@ -75,6 +81,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation", meta = (MultiLine = true))
 	FText DialogueText;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation|Rhubarb")
+	FDreamLipSyncRhubarbGenerationSettings RhubarbGenerationSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation|MFA")
+	FDreamLipSyncMfaGenerationSettings MfaGenerationSettings;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Lip Sync|Generation|NVIDIA ACE")
+	FDreamLipSyncAceGenerationSettings AceGenerationSettings;
 
 private:
 	void EvaluateVisemeKeys(float Time, TMap<FName, float>& OutWeights) const;

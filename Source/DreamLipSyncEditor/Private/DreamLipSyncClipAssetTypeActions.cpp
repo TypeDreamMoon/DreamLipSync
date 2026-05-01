@@ -3,7 +3,7 @@
 #include "DreamLipSyncClipAssetTypeActions.h"
 
 #include "DesktopPlatformModule.h"
-#include "DreamLipSyncAudio2FaceImporter.h"
+#include "DreamLipSyncAceGenerator.h"
 #include "DreamLipSyncClip.h"
 #include "DreamLipSyncMfaGenerator.h"
 #include "DreamLipSyncRhubarbGenerator.h"
@@ -53,6 +53,18 @@ void FDreamLipSyncClipAssetTypeActions::GetActions(const TArray<UObject*>& InObj
 {
 	const TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips = GetTypedWeakObjectPtrs<UDreamLipSyncClip>(InObjects);
 
+	if (FDreamLipSyncAceGenerator::IsAceAvailable())
+	{
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("GenerateFromAce", "Generate From NVIDIA ACE"),
+			LOCTEXT("GenerateFromAceTooltip", "Run NVIDIA ACE Audio2Face-3D offline and write generated MorphFrames."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateSP(this, &FDreamLipSyncClipAssetTypeActions::GenerateFromAce, Clips))
+		);
+
+		MenuBuilder.AddMenuSeparator();
+	}
+
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("GenerateFromRhubarb", "Generate From Rhubarb"),
 		LOCTEXT("GenerateFromRhubarbTooltip", "Run Rhubarb Lip Sync on the clip audio and write generated MorphFrames."),
@@ -82,13 +94,34 @@ void FDreamLipSyncClipAssetTypeActions::GetActions(const TArray<UObject*>& InObj
 		FSlateIcon(),
 		FUIAction(FExecuteAction::CreateSP(this, &FDreamLipSyncClipAssetTypeActions::ImportMfaTextGrid, Clips))
 	);
+}
 
-	MenuBuilder.AddMenuEntry(
-		LOCTEXT("ImportAudio2FaceJson", "Import Audio2Face JSON"),
-		LOCTEXT("ImportAudio2FaceJsonTooltip", "Import an Audio2Face blendshape JSON file and remap its channels to this clip's MorphTargets."),
-		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateSP(this, &FDreamLipSyncClipAssetTypeActions::ImportAudio2FaceJson, Clips))
-	);
+void FDreamLipSyncClipAssetTypeActions::GenerateFromAce(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips)
+{
+	int32 SuccessCount = 0;
+	TArray<FString> Messages;
+
+	for (const TWeakObjectPtr<UDreamLipSyncClip>& WeakClip : Clips)
+	{
+		UDreamLipSyncClip* Clip = WeakClip.Get();
+		if (!Clip)
+		{
+			continue;
+		}
+
+		FString Message;
+		if (FDreamLipSyncAceGenerator::GenerateClipFromAce(Clip, Message))
+		{
+			++SuccessCount;
+		}
+
+		Messages.Add(FString::Printf(TEXT("%s: %s"), *Clip->GetName(), *Message));
+	}
+
+	const FText Title = SuccessCount == Clips.Num()
+		? LOCTEXT("GenerateFromAceSucceeded", "Dream Lip Sync")
+		: LOCTEXT("GenerateFromAceFinishedWithIssues", "Dream Lip Sync - Issues");
+	ShowDreamLipSyncMessage(Title, FString::Join(Messages, TEXT("\n")));
 }
 
 void FDreamLipSyncClipAssetTypeActions::GenerateFromRhubarb(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips)
@@ -228,48 +261,6 @@ void FDreamLipSyncClipAssetTypeActions::ImportMfaTextGrid(TArray<TWeakObjectPtr<
 	const bool bImported = FDreamLipSyncMfaGenerator::ImportMfaTextGridFile(Clip, OpenFilenames[0], Message);
 	ShowDreamLipSyncMessage(
 		bImported ? LOCTEXT("ImportMfaTextGridSucceeded", "Dream Lip Sync") : LOCTEXT("ImportMfaTextGridFailed", "Dream Lip Sync - Import Failed"),
-		Message);
-}
-
-void FDreamLipSyncClipAssetTypeActions::ImportAudio2FaceJson(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips)
-{
-	if (Clips.Num() != 1)
-	{
-		ShowDreamLipSyncMessage(LOCTEXT("ImportAudio2FaceOneClipOnlyTitle", "Dream Lip Sync"), TEXT("Import Audio2Face JSON supports one clip at a time."));
-		return;
-	}
-
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	if (!DesktopPlatform)
-	{
-		return;
-	}
-
-	TArray<FString> OpenFilenames;
-	const bool bPickedFile = DesktopPlatform->OpenFileDialog(
-		GetDialogParentWindowHandle(),
-		TEXT("Import Audio2Face JSON"),
-		FPaths::ProjectContentDir(),
-		TEXT(""),
-		TEXT("Audio2Face JSON (*.json)|*.json"),
-		0,
-		OpenFilenames);
-
-	if (!bPickedFile || OpenFilenames.IsEmpty())
-	{
-		return;
-	}
-
-	UDreamLipSyncClip* Clip = Clips[0].Get();
-	if (!Clip)
-	{
-		return;
-	}
-
-	FString Message;
-	const bool bImported = FDreamLipSyncAudio2FaceImporter::ImportAudio2FaceJsonFile(Clip, OpenFilenames[0], Message);
-	ShowDreamLipSyncMessage(
-		bImported ? LOCTEXT("ImportAudio2FaceJsonSucceeded", "Dream Lip Sync") : LOCTEXT("ImportAudio2FaceJsonFailed", "Dream Lip Sync - Import Failed"),
 		Message);
 }
 

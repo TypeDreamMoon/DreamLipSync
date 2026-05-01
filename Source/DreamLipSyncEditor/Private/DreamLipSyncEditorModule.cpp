@@ -6,7 +6,9 @@
 #include "DreamLipSyncClipAssetTypeActions.h"
 #include "ISequencerModule.h"
 #include "IAssetTools.h"
+#include "DreamLipSyncSoundWaveActions.h"
 #include "MovieScene/DreamLipSyncTrackEditor.h"
+#include "ToolMenus.h"
 
 void FDreamLipSyncEditorModule::StartupModule()
 {
@@ -17,6 +19,8 @@ void FDreamLipSyncEditorModule::StartupModule()
 	TSharedPtr<FDreamLipSyncClipAssetTypeActions> LipSyncClipActions = MakeShareable(new FDreamLipSyncClipAssetTypeActions());
 	AssetTools.RegisterAssetTypeActions(LipSyncClipActions.ToSharedRef());
 	CreatedAssetTypeActions.Add(LipSyncClipActions);
+
+	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FDreamLipSyncEditorModule::RegisterMenus));
 }
 
 void FDreamLipSyncEditorModule::ShutdownModule()
@@ -39,6 +43,14 @@ void FDreamLipSyncEditorModule::ShutdownModule()
 		}
 	}
 	CreatedAssetTypeActions.Empty();
+
+	UToolMenus::UnRegisterStartupCallback(this);
+	UToolMenus::UnregisterOwner(this);
+}
+
+void FDreamLipSyncEditorModule::RegisterMenus()
+{
+	DreamLipSyncSoundWaveActions::RegisterMenus(this);
 }
 
 IMPLEMENT_MODULE(FDreamLipSyncEditorModule, DreamLipSyncEditor)

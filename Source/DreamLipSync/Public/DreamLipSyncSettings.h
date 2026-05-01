@@ -3,17 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "DreamLipSyncTypes.h"
 #include "Engine/DeveloperSettings.h"
 #include "UObject/SoftObjectPath.h"
 #include "DreamLipSyncSettings.generated.h"
-
-UENUM(BlueprintType)
-enum class EDreamLipSyncRhubarbRecognizer : uint8
-{
-	Auto UMETA(DisplayName = "Auto"),
-	PocketSphinx UMETA(DisplayName = "PocketSphinx (English)"),
-	Phonetic UMETA(DisplayName = "Phonetic (Language Independent)")
-};
 
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "Dream Lip Sync"))
 class DREAMLIPSYNC_API UDreamLipSyncSettings : public UDeveloperSettings
@@ -36,6 +29,27 @@ public:
 
 	UPROPERTY(config, EditAnywhere, Category = "Rhubarb", meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float BlendTime = 0.04f;
+
+	UPROPERTY(config, EditAnywhere, Category = "Generation")
+	FDreamLipSyncFrameGenerationSettings FrameGenerationSettings;
+
+	UPROPERTY(config, EditAnywhere, Category = "NVIDIA ACE")
+	bool bEnableAceGeneration = true;
+
+	UPROPERTY(config, EditAnywhere, Category = "NVIDIA ACE", meta = (EditCondition = "bEnableAceGeneration", GetOptions = "DreamLipSyncEditor.DreamLipSyncAceProviderOptions.GetAceProviderOptions"))
+	FName AceProviderName = TEXT("Default");
+
+	UPROPERTY(config, EditAnywhere, Category = "NVIDIA ACE", meta = (EditCondition = "bEnableAceGeneration"))
+	bool bAceForceBurstMode = true;
+
+	UPROPERTY(config, EditAnywhere, Category = "NVIDIA ACE", meta = (ClampMin = "1.0", UIMin = "1.0", EditCondition = "bEnableAceGeneration"))
+	float AceGenerationTimeoutSeconds = 300.f;
+
+	UPROPERTY(config, EditAnywhere, Category = "NVIDIA ACE|Emotion Parameters", meta = (EditCondition = "bEnableAceGeneration"))
+	bool bAceUseEmotionParameters = false;
+
+	UPROPERTY(config, EditAnywhere, Category = "NVIDIA ACE|Emotion Parameters", meta = (EditCondition = "bEnableAceGeneration && bAceUseEmotionParameters"))
+	FDreamLipSyncAceEmotionParameters AceEmotionParameters;
 
 	UPROPERTY(config, EditAnywhere, Category = "MFA")
 	FString MfaCommand = TEXT("mfa");

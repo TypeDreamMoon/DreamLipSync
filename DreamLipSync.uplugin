@@ -10,6 +10,13 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
+	"Plugins": [
+		{
+			"Name": "NV_ACE_Reference",
+			"Enabled": true,
+			"Optional": true
+		}
+	],
 	"Modules": [
 		{
 			"Name": "DreamLipSync",

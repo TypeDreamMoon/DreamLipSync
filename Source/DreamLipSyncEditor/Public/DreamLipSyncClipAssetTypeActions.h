@@ -17,9 +17,9 @@ public:
 	virtual void GetActions(const TArray<UObject*>& InObjects, FMenuBuilder& MenuBuilder) override;
 
 private:
+	void GenerateFromAce(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips);
 	void GenerateFromRhubarb(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips);
 	void ImportRhubarbJson(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips);
 	void GenerateFromMfa(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips);
 	void ImportMfaTextGrid(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips);
-	void ImportAudio2FaceJson(TArray<TWeakObjectPtr<UDreamLipSyncClip>> Clips);
 };
